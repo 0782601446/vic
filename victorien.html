@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Statistical Analysis Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 20px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .file-input,
+        #sheet-selector,
+        #plot-options,
+        #results {
+            margin: 20px 0;
+        }
+
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        input[type="file"],
+        select,
+        button {
+            display: block;
+            width: 100%;
+            padding: 8px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        canvas {
+            display: block;
+            margin: 20px auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Advanced Statistical Analysis Tool</h1>
+        <div class="file-input">
+            <label for="file-upload">Upload a CSV or Excel File:</label>
+            <input type="file" id="file-upload" accept=".csv,.xlsx,.xls">
+        </div>
+        <div id="sheet-selector" class="hidden">
+            <label for="sheets">Select a Sheet:</label>
+            <select id="sheets"></select>
+        </div>
+        <div id="plot-options" class="hidden">
+            <label for="columns">Select Column(s):</label>
+            <select id="columns" multiple></select>
+            <label for="plot-type">Select Plot Type:</label>
+            <select id="plot-type">
+                <option value="line">Line Plot</option>
+                <option value="scatter">Scatter Plot</option>
+                <option value="histogram">Histogram</option>
+                <option value="pie">Pie Chart</option>
+                <option value="skewness">Skewness Plot</option>
+                <option value="kurtosis">Kurtosis Plot</option>
+            </select>
+            <button id="analyze-btn">Analyze</button>
+        </div>
+        <div id="results" class="hidden">
+            <h2>Descriptive Statistics</h2>
+            <ul id="stats-list"></ul>
+            <h2>Plot</h2>
+            <canvas id="plot" width="800" height="400"></canvas>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script>
+        let csvData = [];
+        let headers = [];
+        let chartInstance;
+        let workbook; // Store Excel workbook for multi-sheet support
+
+        document.getElementById('file-upload').addEventListener('change', handleFileUpload);
+        document.getElementById('sheets').addEventListener('change', handleSheetChange);
+        document.getElementById('analyze-btn').addEventListener('click', analyzeData);
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const fileType = file.name.split('.').pop().toLowerCase();
+            if (fileType === 'csv') {
+                parseCSVFile(file);
+            } else if (fileType === 'xlsx' || fileType === 'xls') {
+                parseExcelFile(file);
+            } else {
+                alert('Unsupported file format. Please upload a CSV or Excel file.');
+            }
+        }
+
+        function parseCSVFile(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const text = e.target.result;
+                csvData = text.split('\n').map(row => row.split(','));
+                populateColumns(csvData[0]);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseExcelFile(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                workbook = XLSX.read(data, { type: 'array' });
+                const sheetNames = workbook.SheetNames;
+                const sheetSelector = document.getElementById('sheet-selector');
+                const select = document.getElementById('sheets');
+
+                select.innerHTML = '';
+                sheetNames.forEach(sheet => {
+                    const option = document.createElement('option');
+                    option.value = sheet;
+                    option.textContent = sheet;
+                    select.appendChild(option);
+                });
+
+                sheetSelector.classList.remove('hidden');
+                loadSheetData(sheetNames[0]); // Load first sheet by default
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function handleSheetChange() {
+            const sheetName = document.getElementById('sheets').value;
+            loadSheetData(sheetName);
+        }
+
+        function loadSheetData(sheetName) {
+            const worksheet = workbook.Sheets[sheetName];
+            csvData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            populateColumns(csvData[0]);
+        }
+
+        function populateColumns(headers) {
+            const columnSelect = document.getElementById('columns');
+            columnSelect.innerHTML = '';
+            headers.forEach((header, index) => {
+                const option = document.createElement('option');
+                option.value = index;
+                option.textContent = header;
+                columnSelect.appendChild(option);
+            });
+            document.getElementById('plot-options').classList.remove('hidden');
+        }
+
+        function analyzeData() {
+            const selectedColumns = Array.from(document.getElementById('columns').selectedOptions).map(option => option.value);
+            const plotType = document.getElementById('plot-type').value;
+
+            if (!selectedColumns.length) {
+                alert("Please select at least one column.");
+                return;
+            }
+
+            const values = selectedColumns.map(index => csvData.slice(1).map(row => parseFloat(row[index])).filter(val => !isNaN(val)));
+
+            // Perform statistical analysis
+            const stats = computeStatistics(values[0]);
+            displayStatistics(stats);
+
+            // Plot the data
+            displayPlot(values, plotType, selectedColumns);
+        }
+
+        function computeStatistics(values) {
+            const n = values.length;
+            const mean = values.reduce((sum, val) => sum + val, 0) / n;
+            const variance = values.reduce((sum, val) => sum + (val - mean) ** 2, 0) / n;
+            const stdDev = Math.sqrt(variance);
+            const skewness = values.reduce((sum, val) => sum + ((val - mean) ** 3), 0) / n / Math.pow(stdDev, 3);
+            const kurtosis = values.reduce((sum, val) => sum + ((val - mean) ** 4), 0) / n / Math.pow(stdDev, 4) - 3;
+
+            return {
+                mean,
+                variance,
+                stdDev,
+                skewness,
+                kurtosis,
+                min: Math.min(...values),
+                max: Math.max(...values),
+                count: n
+            };
+        }
+
+        function displayStatistics(stats) {
+            const statsList = document.getElementById('stats-list');
+            statsList.innerHTML = '';
+            for (const [key, value] of Object.entries(stats)) {
+                const li = document.createElement('li');
+                li.textContent = `${key.charAt(0).toUpperCase() + key.slice(1)}: ${value.toFixed(2)}`;
+                statsList.appendChild(li);
+            }
+            document.getElementById('results').classList.remove('hidden');
+        }
+
+        function displayPlot(values, plotType, selectedColumns) {
+            const ctx = document.getElementById('plot').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            const labels = values[0].map((_, i) => i + 1);
+
+            if (plotType === 'pie') {
+                const dataset = values[0].reduce((acc, val) => {
+                    acc[val] = (acc[val] || 0) + 1;
+                    return acc;
+                }, {});
+                chartInstance = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: Object.keys(dataset),
+                        datasets: [{
+                            data: Object.values(dataset),
+                            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'],
+                        }],
+                    },
+                });
+            } else if (plotType === 'skewness' || plotType === 'kurtosis') {
+                chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: selectedColumns.map(col => `Column ${parseInt(col) + 1}`),
+                        datasets: [{
+                            data: values.map(v => plotType === 'skewness' ? computeStatistics(v).skewness : computeStatistics(v).kurtosis),
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                        }],
+                    },
+                });
+            } else {
+                const datasets = values.map((val, i) => ({
+                    label: `Column ${selectedColumns[i]}`,
+                    data: val,
+                    borderColor: `rgba(${75 + i * 50}, ${192 - i * 50}, 192, 1)`,
+                    backgroundColor: `rgba(${75 + i * 50}, ${192 - i * 50}, 192, 0.2)`,
+                }));
+
+                chartInstance = new Chart(ctx, {
+                    type: plotType,
+                    data: { labels, datasets },
+                });
+            }
+        }
+    </script>
+</body>
+</html>
